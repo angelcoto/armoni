@@ -3,7 +3,7 @@
 
 # armoni.py
 #       
-#  Copyright 2012 Ángel Coto <codiasw@gmail.com>
+#  Copyright 2012-2014 Ángel Coto <codiasw@gmail.com>
 #  
 #  This program is free software; you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -26,6 +26,9 @@
 # Historial de versión
 # 1.0.1: Incorpora los destinatarios en el mensaje que se guarda en log de eventos, 
 #        relativo a la notificación de cumplimiento de regla
+# 1.1.0: * Simplifica el método de comparación
+#        * Actualiza el listado de archivos cada vez que se hace ronda de monitoreo.
+#          Esto funciona en modalidad de directorio.
 
 import os
 import smtplib
@@ -42,8 +45,8 @@ from socket import gethostname
 
 ### Define la versión del programa
 Programa = 'armoni'
-Ver = '1.0.1 (beta)'
-Copyright = 'Copyright (c) 2012-2013 Angel Coto <codiasw@gmail.com>'
+Ver = '1.1.0 (beta)'
+Copyright = 'Copyright (c) 2012-2014 Angel Coto <codiasw@gmail.com>'
 Maquina = gethostname()
 
 ### Inicializa variables de mensajes
@@ -289,32 +292,13 @@ class Monitor:
 		return Verificable
 		
 	def CargaArchivos(self, TipoObjeto, Objetos): #Carga inicial de archivos y sus hash sha1
+		self.Archivos = [] 
 		Resultado = False
-		if TipoObjeto == 'directorio':
-			ListaArchivos = os.listdir(Objetos)
-			for Archivo in ListaArchivos:
-				RegistroArchivo = []
-				RegistroArchivoError = []
-				FullName = os.path.join(Objetos, Archivo)
-				if os.path.isfile(FullName): # Si el archivo existe
-					if os.access(FullName,os.R_OK): # Si tiene permiso de lectura
-						if not enllavado(FullName): #Si no está enllavado (comprobado con función de artamiz)
-							RegistroArchivo.append(Objetos) #Guarda el directorio
-							RegistroArchivo.append(Archivo) #Guarda el nombre del archivo
-							RegistroArchivo.append(calcsum(FullName,'a','sha1')) #Guarda el hash sha1 del archivo
-							self.Archivos.append(RegistroArchivo)
-						else:
-							RegistroArchivoError.append(FullName)
-							RegistroArchivoError.append('enllavado')
-							self.ArchivosError.append(RegistroArchivoError)
-					else:
-						RegistroArchivoError.append(FullName)
-						RegistroArchivoError.append('sinpermisolectura')
-						self.ArchivosError.append(RegistroArchivoError)
-		else:
-			for Archivo in Objetos:
-				RegistroArchivo = []
-				RegistroArchivoError = []
+
+		for Archivo in Objetos:
+			RegistroArchivo = []
+			RegistroArchivoError = []
+			if os.path.isfile(Archivo): # Si el archivo existe
 				if os.access(Archivo,os.R_OK): # Si tiene permiso de lectura
 					if not enllavado(Archivo): #Si no está enllavado (comprobado con función de artamiz)
 						RegistroArchivo.append(Archivo)
@@ -328,34 +312,11 @@ class Monitor:
 					RegistroArchivoError.append(Archivo)
 					RegistroArchivoError.append('sinpermisolectura')
 					self.ArchivosError.append(RegistroArchivoError)
+
 		if self.Archivos:
 			Resultado = True
 		return Resultado
 			
-	def VerificaDirectorio(self, Directorio,  CausaAlerta):
-		Indice = 0
-		Alerta = False
-		Alertas = []
-		self.ArchivosError = []
-		for Archivo in self.Archivos: #Recorre la lista de archivos
-			if Archivo[0] == Directorio: #Solo analiza los que corresponden al Directorio
-				FullName = os.path.join(Directorio, Archivo[1])
-				if self.ArchivoVerificable(FullName):
-					NuevoHash = calcsum(FullName, 'a', 'sha1')
-					if CausaAlerta == 'nocambio': #Alerta cuando no cambia
-						if Archivo[2] == NuevoHash: #Compara los hash. Entra si el archivo no ha variado
-							Alerta = True
-							Alertas.append(FullName)
-					elif CausaAlerta == 'cambio': #Alerta cuando hay cambio
-						if Archivo[2] <> NuevoHash: #Compara los hash.  Entra si el archivo ha variado
-							Alerta = True
-							Alertas.append(FullName)
-					else:
-						None
-					self.Archivos[Indice] = [Archivo[0], Archivo[1], NuevoHash] #Actualiza el vector de archivos con el nuevo hash
-			Indice = Indice + 1
-		return Alerta, Alertas
-		
 	def VerificaArchivos(self, CausaAlerta):
 		Indice = 0
 		Alerta = False
@@ -436,8 +397,12 @@ def main():
 	
 	def CargaInicial():
 		if TipoObjeto == 'directorio':
+			Archivos = []
 			for Directorio in ParametrosIni.Directorios:
-				ResultadoCarga = MiMonitor.CargaArchivos(TipoObjeto, Directorio)
+				ListaArchivos = os.listdir(Directorio)
+				for Archivo in ListaArchivos:
+					Archivos.append(os.path.join(Directorio, Archivo))
+			ResultadoCarga = MiMonitor.CargaArchivos(TipoObjeto, Archivos)
 		else:
 			ResultadoCarga = MiMonitor.CargaArchivos(TipoObjeto, ParametrosIni.Archivos)
 		if MiMonitor.ArchivosError:
@@ -501,22 +466,6 @@ def main():
 			PreparaRegistroErr(EventoLog4.format(Hora, Programa))
 			PreparaRegistroErr(ErrorLog2.format(Hora))
 
-	def MonitoreaDirectorios():
-		PreparaRegistroErr(EventoLog6.format(HoraTexto()))
-		for Directorio in ParametrosIni.Directorios:
-			HayAlerta, Alertas = MiMonitor.VerificaDirectorio(Directorio, CausaAlerta)
-			Hora = HoraTexto()
-			for ArchivoError in MiMonitor.ArchivosError:
-				PreparaRegistroLog(ArchivoError[0], Hora, ArchivoError[1])
-			if HayAlerta:
-				for Archivo in Alertas:
-					PreparaRegistroLog(Archivo, Hora, CausaAlerta)
-				PreparaCorreoLog(Alertas, CausaAlerta, Hora)
-#		if HayAlerta or MiMonitor.ArchivosError:
-#			ImprimeLinea()
-		PreparaRegistroErr(EventoLog7.format(HoraTexto()))
-		ImprimeLinea()
-	
 	def MonitoreaArchivos():
 		PreparaRegistroErr(EventoLog6.format(HoraTexto()))
 		HayAlerta, Alertas = MiMonitor.VerificaArchivos(CausaAlerta)
@@ -557,10 +506,11 @@ def main():
 					Error = False	
 					sleep(ParametrosIni.Intervalo)
 					while not Error:
+						MonitoreaArchivos()
 						if TipoObjeto == 'directorio':
-							MonitoreaDirectorios()
-						else:
-							MonitoreaArchivos()
+							if not CargaInicial():
+								None
+								#Error = True
 						sleep(ParametrosIni.Intervalo)
 				else:
 					PreparaRegistroErr(ErrorLog4.format(HoraTexto(),Programa))
